@@ -5,6 +5,7 @@ use std::{
 	future::Future,
 	thread,
 };
+use threadpool;
 use futures::task;
 
 type BoxedFuture = Mutex<Pin<Box<dyn Future<Output = ()> + Sync + Send>>>;
@@ -15,7 +16,7 @@ pub struct MyTokio {
 }
 
 pub struct Task {
-	future: BoxedFuture
+	future: BoxedFuture,
 }
 
 impl MyTokio {
@@ -26,19 +27,23 @@ impl MyTokio {
 	pub fn spawn<T:>(&self, fut: T)
 	where T: Future<Output = ()> + Sync + Send + 'static,
 	{
-		let task = Arc::new(Task {future: Mutex::new(Box::pin(fut))});
+		let task = Arc::new(Task {
+			future: Mutex::new(Box::pin(fut)),
+		});
 		self.sender.send(task).unwrap();
 	}
 	pub fn run(self) {
+		let pool = threadpool::ThreadPool::new(5);
 		loop {
 			let task = self.receiver.recv().unwrap();
-			thread::spawn(move ||{
+			pool.execute(move ||{
 					let waker = task::noop_waker();
 					let mut cx = Context::from_waker(&waker);
 					let mut future = task.future.lock().unwrap();
 					if future.as_mut().poll(&mut cx) == Poll::Pending {
 						println!("handle this");
 					}
+					println!("executed on thread: {:?}", thread::current().id());
 			});
 		}
 	}
